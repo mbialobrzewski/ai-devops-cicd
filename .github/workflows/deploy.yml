@@ -1,0 +1,128 @@
+name: Deploy quotes-api (dzień 1)
+
+on:
+  push:
+    branches: [main]
+
+# Deny by default — każdy job dostaje tylko to, czego naprawdę potrzebuje.
+# Patrz docs/github-actions-permissions.md.
+permissions: {}
+
+jobs:
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # contents: read — tylko tyle, żeby actions/checkout pobrał kod do zlintowania.
+    # Ten job niczego nie publikuje i nie rozmawia z AWS, więc nic więcej nie dostaje.
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: app/requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+      - run: ruff check .
+
+  test:
+    name: Testy (pytest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Jak wyżej: tylko odczyt kodu, żeby uruchomić testy jednostkowe.
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: app/requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+      - run: pytest -q
+
+  build:
+    name: Build i push obrazu do ECR
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # contents: read  — checkout Dockerfile i kodu aplikacji do zbudowania obrazu.
+    # id-token: write — jedyny powód: musi poprosić GitHuba o token OIDC, żeby
+    #   aws-actions/configure-aws-credentials wymieniło go na chwilowe poświadczenia AWS
+    #   i job mógł się zalogować do ECR (aws-actions/amazon-ecr-login). To NIE daje
+    #   dostępu do repo GitHub ani do AWS samo z siebie — o tym, co wolno, decyduje
+    #   trust policy roli github-actions-deploy (docs/github-actions-permissions.md, pkt 5).
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      image: ${{ steps.image.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: eu-central-1
+
+      - id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - uses: docker/setup-buildx-action@v3
+
+      - id: image
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          # Nazwa repozytorium ECR jest stała — pełny adres rejestru zwraca krok
+          # login-ecr, nie trzeba trzymać go w zmiennej repozytorium.
+          REPOSITORY: quotes-api
+          TAG: ${{ github.sha }}
+        run: echo "image=$REGISTRY/$REPOSITORY:$TAG" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: app
+          push: true
+          tags: ${{ steps.image.outputs.image }}
+
+  deploy:
+    name: Deploy na EKS
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # contents: read  — checkout manifestów z app/k8s-dzien1/.
+    # id-token: write — jak w jobie build: token OIDC do zalogowania się do AWS,
+    #   tym razem żeby aws eks update-kubeconfig i kubectl mogły rozmawiać z klastrem
+    #   jako ta sama rola github-actions-deploy.
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: eu-central-1
+
+      - uses: azure/setup-kubectl@v4
+
+      - run: aws eks update-kubeconfig --name szkolenie-ai-devops --region eu-central-1
+
+      - env:
+          IMAGE: ${{ needs.build.outputs.image }}
+          NAMESPACE: ${{ vars.K8S_NAMESPACE }}
+        run: |
+          sed "s|PODMIEN_NA_OBRAZ|$IMAGE|" app/k8s-dzien1/deployment.yaml \
+            | kubectl apply -n "$NAMESPACE" -f -
+          kubectl apply -n "$NAMESPACE" -f app/k8s-dzien1/service.yaml
+          kubectl rollout status deployment/quotes-api-d1 -n "$NAMESPACE" --timeout=180s
