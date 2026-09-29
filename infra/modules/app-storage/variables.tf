@@ -14,12 +14,6 @@ variable "blok" {
   default     = "b1"
 }
 
-variable "region" {
-  description = "Region AWS, w którym powstają zasoby"
-  type        = string
-  default     = "eu-central-1"
-}
-
 variable "cidr_vpc" {
   description = "Zakres adresów dla VPC szkoleniowej"
   type        = string

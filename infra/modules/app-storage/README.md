@@ -21,7 +21,6 @@ module "app_storage" {
 |---|---|---|---|
 | `uczestnik` | string | — | Identyfikator uczestnika, wchodzi w nazwy zasobów |
 | `blok` | string | `"b1"` | Numer bloku szkolenia, do tagów |
-| `region` | string | `"eu-central-1"` | Region AWS |
 | `cidr_vpc` | string | `"10.20.0.0/16"` | Zakres adresów VPC |
 
 ## Wyjście

@@ -48,7 +48,9 @@ Przed pierwszym pushem ustaw zmienne repozytorium (wartości masz w `.env` i od 
 ```bash
 set -a; source .env; set +a
 gh variable set AWS_DEPLOY_ROLE_ARN --body "arn:aws:iam::<KONTO>:role/github-actions-deploy"
+     gh variable set AWS_DEPLOY_ROLE_ARN --repo mbialobrzewski/ai-devops-cicd --body "arn:aws:iam::574921529806:role/github-actions-deploy"
 gh variable set K8S_NAMESPACE --body "$UCZESTNIK"
+            gh variable set K8S_NAMESPACE --repo mbialobrzewski/ai-devops-cicd --body marek-b
 gh variable list                # obie zmienne mają być w Twoim forku
 ```
 
